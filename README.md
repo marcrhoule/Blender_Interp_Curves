@@ -1,6 +1,6 @@
 # Blender Custom Interpolation Curves - 140+ Functions
 
-A Blender addon that provides 140+ custom keyframe interpolation curves with visual previews.
+A Blender 4.5.3 addon that provides 140+ custom keyframe interpolation curves with visual previews.
 
 ## Features
 - 140+ interpolation functions across 10 categories
