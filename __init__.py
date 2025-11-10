@@ -281,9 +281,6 @@ class ANIM_OT_apply_interpolation(bpy.types.Operator):
                 if start_frame >= end_frame:
                     continue
                 
-                # For return-to-start functions, use start_value as the target end value
-                target_end_value = start_value if is_return_to_start else end_value
-                
                 # Remove existing keyframes between start and end (except endpoints)
                 points_to_remove = [kp for kp in fcurve.keyframe_points 
                                    if start_frame < kp.co[0] < end_frame]
@@ -304,7 +301,7 @@ class ANIM_OT_apply_interpolation(bpy.types.Operator):
                         t_scaled = 1.0 - t_scaled
                     
                     try:
-                        # Get interpolated value
+                        # Get interpolated value (this already goes 0→1→0 for marked functions)
                         interp_t = interp_func(t_scaled)
                         
                         # Apply overshoot multiplier
@@ -313,18 +310,20 @@ class ANIM_OT_apply_interpolation(bpy.types.Operator):
                         elif interp_t > 1:
                             interp_t = 1 + (interp_t - 1) * self.overshoot
                         
-                        # Calculate final value using target_end_value
-                        interp_value = start_value + interp_t * (target_end_value - start_value)
+                        # Calculate final value
+                        # The interp_t value from the function IS the normalized value (0-1 range)
+                        # We just scale it between start and end values
+                        interp_value = start_value + interp_t * (end_value - start_value)
                         
                         # Apply influence
-                        linear_value = start_value + t * (target_end_value - start_value)
+                        linear_value = start_value + t * (end_value - start_value)
                         influence_factor = self.influence / 100.0
                         value = linear_value * (1 - influence_factor) + interp_value * influence_factor
                         
                         fcurve.keyframe_points.insert(frame, value)
                     except Exception as e:
                         # Fallback to linear interpolation
-                        value = start_value + t * (target_end_value - start_value)
+                        value = start_value + t * (end_value - start_value)
                         fcurve.keyframe_points.insert(frame, value)
                         print(f"Error applying interpolation at frame {frame}: {e}")
                 
