@@ -34,7 +34,8 @@ def load_preview_icons():
     
     if os.path.exists(preview_dir):
         for name in INTERPOLATION_FUNCTIONS.keys():
-            safe_name = name.replace(" ", "_").replace("+", "plus").replace("/", "_")
+            # Remove the return marker for filename
+            safe_name = name.replace(" ↺", "").replace(" ", "_").replace("+", "plus").replace("/", "_")
             img_path = os.path.join(preview_dir, f"{safe_name}.png")
             
             if os.path.exists(img_path):
@@ -99,10 +100,10 @@ class ANIM_OT_apply_interpolation(bpy.types.Operator):
         name="Output Mode",
         description="Where to apply the interpolation",
         items=[
-            ('GEO_NODES', "Geometry Nodes", "Create a node group for Geometry Nodes", 'NODETREE', 0),
-            ('KEYFRAMES', "Keyframes", "Apply to selected keyframes in timeline", 'KEYFRAME', 1),
+            ('KEYFRAMES', "Keyframes", "Apply to selected keyframes in timeline", 'KEYFRAME', 0),
+            ('GEO_NODES', "Geometry Nodes", "Create a node group for Geometry Nodes", 'NODETREE', 1),
         ],
-        default='GEO_NODES'
+        default='KEYFRAMES'
     )
     
     @classmethod
@@ -244,6 +245,9 @@ class ANIM_OT_apply_interpolation(bpy.types.Operator):
         action = obj.animation_data.action
         interp_func = INTERPOLATION_FUNCTIONS[self.interp_name]
         
+        # Check if this is a return-to-start function (marked with ↺)
+        is_return_to_start = " ↺" in self.interp_name
+        
         modified_count = 0
         
         # Process each fcurve
@@ -273,15 +277,12 @@ class ANIM_OT_apply_interpolation(bpy.types.Operator):
                 start_value = start_kf.co[1]
                 end_value = end_kf.co[1]
                 
-                # Check if this is a "return to start" function (marked with asterisk)
-                # If so, override the end value to match the start value
-                if self.interp_name.endswith('*'):
-                    end_value = start_value
-                    end_kf.co = (end_frame, start_value)  # Actually move the end keyframe
-                
                 # Skip if frames are the same
                 if start_frame >= end_frame:
                     continue
+                
+                # For return-to-start functions, use start_value as the target end value
+                target_end_value = start_value if is_return_to_start else end_value
                 
                 # Remove existing keyframes between start and end (except endpoints)
                 points_to_remove = [kp for kp in fcurve.keyframe_points 
@@ -312,20 +313,24 @@ class ANIM_OT_apply_interpolation(bpy.types.Operator):
                         elif interp_t > 1:
                             interp_t = 1 + (interp_t - 1) * self.overshoot
                         
-                        # Calculate final value
-                        interp_value = start_value + interp_t * (end_value - start_value)
+                        # Calculate final value using target_end_value
+                        interp_value = start_value + interp_t * (target_end_value - start_value)
                         
                         # Apply influence
-                        linear_value = start_value + t * (end_value - start_value)
+                        linear_value = start_value + t * (target_end_value - start_value)
                         influence_factor = self.influence / 100.0
                         value = linear_value * (1 - influence_factor) + interp_value * influence_factor
                         
                         fcurve.keyframe_points.insert(frame, value)
                     except Exception as e:
                         # Fallback to linear interpolation
-                        value = start_value + t * (end_value - start_value)
+                        value = start_value + t * (target_end_value - start_value)
                         fcurve.keyframe_points.insert(frame, value)
                         print(f"Error applying interpolation at frame {frame}: {e}")
+                
+                # If this is a return-to-start function, move the end keyframe to start value
+                if is_return_to_start:
+                    end_kf.co = (end_frame, start_value)
                 
                 modified_count += 1
             
@@ -342,7 +347,10 @@ class ANIM_OT_apply_interpolation(bpy.types.Operator):
                 area.tag_redraw()
         
         if modified_count > 0:
-            self.report({'INFO'}, f"Applied {self.interp_name} to {modified_count} curve segment(s)")
+            if is_return_to_start:
+                self.report({'INFO'}, f"Applied {self.interp_name} to {modified_count} curve segment(s) - Returns to start")
+            else:
+                self.report({'INFO'}, f"Applied {self.interp_name} to {modified_count} curve segment(s)")
         else:
             self.report({'WARNING'}, "No valid keyframe pairs selected")
         
@@ -366,8 +374,8 @@ class ANIM_OT_apply_interpolation(bpy.types.Operator):
     def draw(self, context):
         layout = self.layout
         
-        # Show large preview image
-        safe_name = self.interp_name.replace(" ", "_").replace("+", "plus").replace("/", "_")
+        # Show large preview image (remove ↺ for filename lookup)
+        safe_name = self.interp_name.replace(" ↺", "").replace(" ", "_").replace("+", "plus").replace("/", "_")
         pcoll = preview_collections.get("main")
         if pcoll and safe_name in pcoll:
             icon = pcoll[safe_name]
@@ -465,7 +473,8 @@ class VIEW3D_PT_custom_interpolation(bpy.types.Panel):
             # Display functions in this category
             for name in function_list:
                 if name in INTERPOLATION_FUNCTIONS:
-                    safe_name = name.replace(" ", "_").replace("+", "plus").replace("/", "_")
+                    # Remove ↺ for filename lookup but keep in display
+                    safe_name = name.replace(" ↺", "").replace(" ", "_").replace("+", "plus").replace("/", "_")
                     
                     # Get the icon if available
                     if pcoll and safe_name in pcoll:
@@ -473,7 +482,7 @@ class VIEW3D_PT_custom_interpolation(bpy.types.Panel):
                     else:
                         icon = 0
                     
-                    # Create operator button with icon
+                    # Create operator button with icon (name includes ↺ symbol)
                     op = box.operator(ANIM_OT_apply_interpolation.bl_idname, text=name, icon_value=icon)
                     op.interp_name = name
             
